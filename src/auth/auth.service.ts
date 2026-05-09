@@ -61,6 +61,8 @@ export class AuthService {
     });
 
     const text = await res.text();
+    console.log('Spotify token response status:', res.status);
+    console.log('Spotify token response:', text.substring(0, 200));
     if (!res.ok) {
       console.error('Spotify token exchange failed:', res.status, text);
       throw new Error(`Spotify token exchange failed: ${text}`);
@@ -86,10 +88,16 @@ export class AuthService {
   async getSpotifyProfile(
     accessToken: string,
   ): Promise<{ id: string; display_name: string; images: { url: string }[] }> {
+    console.log('Fetching Spotify profile with token:', accessToken?.substring(0, 10) + '...');
     const res = await fetch('https://api.spotify.com/v1/me', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    return res.json();
+    const text = await res.text();
+    if (!res.ok) {
+      console.error('Spotify profile fetch failed:', res.status, text);
+      throw new Error(`Spotify profile fetch failed: ${text}`);
+    }
+    return JSON.parse(text);
   }
 
   async getGoogleProfile(
