@@ -32,7 +32,7 @@ export class AuthService {
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: this.config.get('GOOGLE_CLIENT_ID')!,
-      scope: 'https://www.googleapis.com/auth/youtube.readonly',
+      scope: 'https://www.googleapis.com/auth/youtube.readonly openid profile email',
       redirect_uri: this.config.get('GOOGLE_REDIRECT_URI')!,
       access_type: 'offline',
       prompt: 'consent',
@@ -107,7 +107,12 @@ export class AuthService {
       'https://www.googleapis.com/oauth2/v3/userinfo',
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
-    return res.json();
+    const text = await res.text();
+    console.log('Google profile response:', text.substring(0, 300));
+    if (!res.ok) {
+      throw new Error(`Google profile fetch failed: ${text}`);
+    }
+    return JSON.parse(text);
   }
 
   async createOrUpdateUser(
