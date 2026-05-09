@@ -42,6 +42,9 @@ export class AuthService {
   }
 
   async exchangeSpotifyCode(code: string): Promise<TokenResponse> {
+    const redirectUri = this.config.get('SPOTIFY_REDIRECT_URI')!;
+    console.log('Spotify token exchange with redirect_uri:', redirectUri);
+
     const res = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
       headers: {
@@ -53,10 +56,16 @@ export class AuthService {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code,
-        redirect_uri: this.config.get('SPOTIFY_REDIRECT_URI')!,
+        redirect_uri: redirectUri,
       }),
     });
-    return res.json();
+
+    const text = await res.text();
+    if (!res.ok) {
+      console.error('Spotify token exchange failed:', res.status, text);
+      throw new Error(`Spotify token exchange failed: ${text}`);
+    }
+    return JSON.parse(text);
   }
 
   async exchangeGoogleCode(code: string): Promise<TokenResponse> {
