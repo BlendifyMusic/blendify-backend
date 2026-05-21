@@ -21,8 +21,6 @@ export class MatcherService {
           shared.push({
             ...trackA,
             weight: trackA.weight + tracksB[j].weight,
-            spotifyUri: trackA.platform === 'spotify' ? trackA.id : tracksB[j].platform === 'spotify' ? tracksB[j].id : null,
-            ytMusicId: trackA.platform === 'ytmusic' ? trackA.id : tracksB[j].platform === 'ytmusic' ? tracksB[j].id : null,
           } as any);
           matchedB.add(j);
           matched = true;

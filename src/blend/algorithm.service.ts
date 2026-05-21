@@ -182,7 +182,7 @@ export class AlgorithmService {
       albumArt: track.albumArt,
       isrc: track.isrc,
       source,
-      spotifyUri: track.platform === 'spotify' ? `spotify:track:${track.id}` : null,
+      lastfmUrl: track.platform === 'lastfm' ? track.id : null,
       ytMusicId: track.platform === 'ytmusic' ? track.id : null,
     };
   }

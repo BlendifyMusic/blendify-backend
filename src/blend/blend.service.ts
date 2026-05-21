@@ -21,9 +21,11 @@ export class BlendService {
     if (!userDoc.exists) throw new NotFoundException('User not found');
 
     const user = userDoc.data()!;
+    const profileKey =
+      user.platform === 'lastfm' ? user.lastfmUsername : user.accessToken;
     const profile = await this.music.fetchListeningProfile(
       user.platform as Platform,
-      user.accessToken,
+      profileKey,
     );
 
     await this.storeListeningData(uid, profile);
@@ -39,7 +41,7 @@ export class BlendService {
       createdAt: new Date(),
       completedAt: null,
       result: null,
-      playlistUrls: { spotify: null, ytmusic: null },
+      playlistUrls: { lastfm: null, ytmusic: null },
     });
 
     return blendId;
@@ -63,9 +65,11 @@ export class BlendService {
 
     const userDoc = await db.doc(`users/${uid}`).get();
     const user = userDoc.data()!;
+    const joinerProfileKey =
+      user.platform === 'lastfm' ? user.lastfmUsername : user.accessToken;
     const joinerProfile = await this.music.fetchListeningProfile(
       user.platform as Platform,
-      user.accessToken,
+      joinerProfileKey,
     );
 
     await this.storeListeningData(uid, joinerProfile);

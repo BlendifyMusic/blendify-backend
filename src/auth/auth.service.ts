@@ -1,12 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FirebaseService } from '../firebase/firebase.service';
+import { createHash } from 'crypto';
 import { Platform } from '../music/types';
 
 interface TokenResponse {
   access_token: string;
   refresh_token: string;
   expires_in: number;
+}
+
+interface LastfmSession {
+  name: string;
+  key: string;
+  subscriber: number;
 }
 
 @Injectable()
@@ -16,16 +23,12 @@ export class AuthService {
     private firebase: FirebaseService,
   ) {}
 
-  getSpotifyAuthUrl(state: string): string {
+  getLastfmAuthUrl(state: string): string {
     const params = new URLSearchParams({
-      response_type: 'code',
-      client_id: this.config.get('SPOTIFY_CLIENT_ID')!,
-      scope:
-        'user-top-read user-read-recently-played playlist-modify-public playlist-modify-private',
-      redirect_uri: this.config.get('SPOTIFY_REDIRECT_URI')!,
-      state,
+      api_key: this.config.get('LASTFM_API_KEY')!,
+      cb: `${this.config.get('LASTFM_CALLBACK_URI')}?state=${state}`,
     });
-    return `https://accounts.spotify.com/authorize?${params}`;
+    return `https://www.last.fm/api/auth/?${params}`;
   }
 
   getYtMusicAuthUrl(state: string): string {
@@ -41,33 +44,35 @@ export class AuthService {
     return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   }
 
-  async exchangeSpotifyCode(code: string): Promise<TokenResponse> {
-    const redirectUri = this.config.get('SPOTIFY_REDIRECT_URI')!;
-    console.log('Spotify token exchange with redirect_uri:', redirectUri);
+  async exchangeLastfmToken(token: string): Promise<LastfmSession> {
+    const apiKey = this.config.get('LASTFM_API_KEY')!;
+    const secret = this.config.get('LASTFM_SHARED_SECRET')!;
 
-    const res = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${Buffer.from(
-          `${this.config.get('SPOTIFY_CLIENT_ID')}:${this.config.get('SPOTIFY_CLIENT_SECRET')}`,
-        ).toString('base64')}`,
-      },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: redirectUri,
-      }),
+    const sigParams: Record<string, string> = {
+      api_key: apiKey,
+      method: 'auth.getSession',
+      token,
+    };
+    const apiSig = this.lastfmSign(sigParams, secret);
+
+    const params = new URLSearchParams({
+      method: 'auth.getSession',
+      api_key: apiKey,
+      token,
+      api_sig: apiSig,
+      format: 'json',
     });
 
-    const text = await res.text();
-    console.log('Spotify token response status:', res.status);
-    console.log('Spotify token response:', text.substring(0, 200));
-    if (!res.ok) {
-      console.error('Spotify token exchange failed:', res.status, text);
-      throw new Error(`Spotify token exchange failed: ${text}`);
+    const res = await fetch(
+      `https://ws.audioscrobbler.com/2.0/?${params}`,
+    );
+    const data = await res.json();
+
+    if (data.error) {
+      throw new Error(`Last.fm auth failed: ${data.message}`);
     }
-    return JSON.parse(text);
+
+    return data.session;
   }
 
   async exchangeGoogleCode(code: string): Promise<TokenResponse> {
@@ -85,19 +90,26 @@ export class AuthService {
     return res.json();
   }
 
-  async getSpotifyProfile(
-    accessToken: string,
-  ): Promise<{ id: string; display_name: string; images: { url: string }[] }> {
-    console.log('Fetching Spotify profile with token:', accessToken?.substring(0, 10) + '...');
-    const res = await fetch('https://api.spotify.com/v1/me', {
-      headers: { Authorization: `Bearer ${accessToken}` },
+  async getLastfmProfile(
+    sessionKey: string,
+  ): Promise<{ name: string; image: string }> {
+    const apiKey = this.config.get('LASTFM_API_KEY')!;
+    const params = new URLSearchParams({
+      method: 'user.getInfo',
+      api_key: apiKey,
+      sk: sessionKey,
+      format: 'json',
     });
-    const text = await res.text();
-    if (!res.ok) {
-      console.error('Spotify profile fetch failed:', res.status, text);
-      throw new Error(`Spotify profile fetch failed: ${text}`);
-    }
-    return JSON.parse(text);
+    const res = await fetch(`https://ws.audioscrobbler.com/2.0/?${params}`);
+    const data = await res.json();
+    const user = data.user;
+    const images = user?.image || [];
+    const imageUrl =
+      images.find((i: any) => i.size === 'extralarge')?.['#text'] ||
+      images.find((i: any) => i.size === 'large')?.['#text'] ||
+      '';
+
+    return { name: user?.name || '', image: imageUrl };
   }
 
   async getGoogleProfile(
@@ -107,12 +119,11 @@ export class AuthService {
       'https://www.googleapis.com/oauth2/v3/userinfo',
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
-    const text = await res.text();
-    console.log('Google profile response:', text.substring(0, 300));
     if (!res.ok) {
+      const text = await res.text();
       throw new Error(`Google profile fetch failed: ${text}`);
     }
-    return JSON.parse(text);
+    return res.json();
   }
 
   async createOrUpdateUser(
@@ -123,6 +134,7 @@ export class AuthService {
     accessToken: string,
     refreshToken: string,
     expiresIn: number,
+    lastfmUsername?: string,
   ): Promise<string> {
     const db = this.firebase.firestore;
     const usersRef = db.collection('users');
@@ -133,7 +145,7 @@ export class AuthService {
       .get();
 
     const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
-    const userData = {
+    const userData: Record<string, any> = {
       displayName,
       avatarUrl,
       platform,
@@ -142,6 +154,9 @@ export class AuthService {
       refreshToken,
       tokenExpiresAt,
     };
+    if (lastfmUsername) {
+      userData.lastfmUsername = lastfmUsername;
+    }
 
     let uid: string;
     if (snapshot.empty) {
@@ -160,20 +175,16 @@ export class AuthService {
     return this.firebase.auth.createCustomToken(uid);
   }
 
-  async refreshSpotifyToken(refreshToken: string): Promise<TokenResponse> {
-    const res = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${Buffer.from(
-          `${this.config.get('SPOTIFY_CLIENT_ID')}:${this.config.get('SPOTIFY_CLIENT_SECRET')}`,
-        ).toString('base64')}`,
-      },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-      }),
-    });
-    return res.json();
+  private lastfmSign(
+    params: Record<string, string>,
+    secret: string,
+  ): string {
+    const keys = Object.keys(params).sort();
+    let sig = '';
+    for (const key of keys) {
+      sig += key + params[key];
+    }
+    sig += secret;
+    return createHash('md5').update(sig, 'utf8').digest('hex');
   }
 }

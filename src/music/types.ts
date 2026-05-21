@@ -1,4 +1,4 @@
-export type Platform = 'spotify' | 'ytmusic';
+export type Platform = 'lastfm' | 'ytmusic';
 
 export interface NormalizedTrack {
   id: string;
@@ -12,6 +12,7 @@ export interface NormalizedTrack {
   popularity: number | null;
   platform: Platform;
   weight: number;
+  mbid?: string | null;
 }
 
 export interface NormalizedArtist {
@@ -53,6 +54,6 @@ export interface PlaylistTrack {
   albumArt: string;
   isrc: string | null;
   source: 'shared' | 'creator' | 'joiner';
-  spotifyUri: string | null;
+  lastfmUrl: string | null;
   ytMusicId: string | null;
 }

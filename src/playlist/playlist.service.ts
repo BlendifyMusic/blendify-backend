@@ -19,75 +19,25 @@ export class PlaylistService {
     const blend = blendDoc.data()!;
     const tracks: PlaylistTrack[] = blend.result.playlist;
 
-    const blendPartner =
-      uid === blend.creatorUid ? blend.joinerName : blend.creatorName;
     const playlistName = `Blendify: ${blend.creatorName} × ${blend.joinerName}`;
 
-    let playlistUrl: string;
-
-    if (platform === 'spotify') {
-      playlistUrl = await this.createSpotifyPlaylist(
-        user.accessToken,
-        user.platformUserId,
-        playlistName,
-        tracks,
-      );
-    } else {
-      playlistUrl = await this.createYtMusicPlaylist(
+    if (platform === 'ytmusic') {
+      const playlistUrl = await this.createYtMusicPlaylist(
         user.accessToken,
         playlistName,
         tracks,
       );
+      await db.doc(`blends/${blendId}`).update({
+        'playlistUrls.ytmusic': playlistUrl,
+      });
+      return playlistUrl;
     }
 
-    await db.doc(`blends/${blendId}`).update({
-      [`playlistUrls.${platform}`]: playlistUrl,
-    });
-
-    return playlistUrl;
-  }
-
-  private async createSpotifyPlaylist(
-    accessToken: string,
-    userId: string,
-    name: string,
-    tracks: PlaylistTrack[],
-  ): Promise<string> {
-    const headers = {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    };
-
-    const createRes = await fetch(
-      `https://api.spotify.com/v1/users/${userId}/playlists`,
-      {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          name,
-          description: 'Created with Blendify ✨',
-          public: true,
-        }),
-      },
-    );
-    const playlist = await createRes.json();
-
-    const uris = tracks
-      .map((t) => t.spotifyUri)
-      .filter(Boolean);
-
-    if (uris.length > 0) {
-      await fetch(
-        `https://api.spotify.com/v1/playlists/${playlist.id}/tracks`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ uris }),
-        },
-      );
-    }
-
-    return playlist.external_urls?.spotify || '';
+    // Last.fm users: generate a shareable track list URL (Last.fm has no playlist API)
+    const trackList = tracks
+      .map((t) => `${t.artist} - ${t.title}`)
+      .join('\n');
+    return `data:text/plain,${encodeURIComponent(trackList)}`;
   }
 
   private async createYtMusicPlaylist(

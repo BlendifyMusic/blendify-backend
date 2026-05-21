@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { MusicService } from './music.service';
-import { SpotifyAdapter } from './spotify.adapter';
+import { LastfmAdapter } from './lastfm.adapter';
 import { YtMusicAdapter } from './ytmusic.adapter';
 
 @Module({
-  providers: [MusicService, SpotifyAdapter, YtMusicAdapter],
+  providers: [MusicService, LastfmAdapter, YtMusicAdapter],
   exports: [MusicService],
 })
 export class MusicModule {}
