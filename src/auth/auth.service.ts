@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { FirebaseService } from '../firebase/firebase.service';
+import { User } from '../entities/user.entity';
 import { createHash } from 'crypto';
 import { Platform } from '../music/types';
 
@@ -21,6 +24,8 @@ export class AuthService {
   constructor(
     private config: ConfigService,
     private firebase: FirebaseService,
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
   ) {}
 
   getLastfmAuthUrl(state: string): string {
@@ -63,9 +68,7 @@ export class AuthService {
       format: 'json',
     });
 
-    const res = await fetch(
-      `https://ws.audioscrobbler.com/2.0/?${params}`,
-    );
+    const res = await fetch(`https://ws.audioscrobbler.com/2.0/?${params}`);
     const data = await res.json();
 
     if (data.error) {
@@ -136,36 +139,37 @@ export class AuthService {
     expiresIn: number,
     lastfmUsername?: string,
   ): Promise<string> {
-    const db = this.firebase.firestore;
-    const usersRef = db.collection('users');
-    const snapshot = await usersRef
-      .where('platform', '==', platform)
-      .where('platformUserId', '==', platformUserId)
-      .limit(1)
-      .get();
-
     const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
-    const userData: Record<string, any> = {
-      displayName,
-      avatarUrl,
-      platform,
-      platformUserId,
-      accessToken,
-      refreshToken,
-      tokenExpiresAt,
-    };
-    if (lastfmUsername) {
-      userData.lastfmUsername = lastfmUsername;
-    }
+
+    let existing = await this.userRepo.findOne({
+      where: { platform, platformUserId },
+    });
 
     let uid: string;
-    if (snapshot.empty) {
+    if (!existing) {
       const userRecord = await this.firebase.auth.createUser({ displayName });
       uid = userRecord.uid;
-      await usersRef.doc(uid).set({ ...userData, createdAt: new Date() });
+      existing = this.userRepo.create({
+        uid,
+        displayName,
+        avatarUrl,
+        platform,
+        platformUserId,
+        accessToken,
+        refreshToken,
+        tokenExpiresAt,
+        lastfmUsername: lastfmUsername || null,
+      });
+      await this.userRepo.save(existing);
     } else {
-      uid = snapshot.docs[0].id;
-      await usersRef.doc(uid).update(userData);
+      uid = existing.uid;
+      existing.displayName = displayName;
+      existing.avatarUrl = avatarUrl;
+      existing.accessToken = accessToken;
+      existing.refreshToken = refreshToken;
+      existing.tokenExpiresAt = tokenExpiresAt;
+      if (lastfmUsername) existing.lastfmUsername = lastfmUsername;
+      await this.userRepo.save(existing);
     }
 
     return uid;

@@ -1,24 +1,24 @@
 import { Injectable } from '@nestjs/common';
-import { FirebaseService } from '../firebase/firebase.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { User } from '../entities/user.entity';
+import { Blend } from '../entities/blend.entity';
 import { PlaylistTrack, Platform } from '../music/types';
 
 @Injectable()
 export class PlaylistService {
-  constructor(private firebase: FirebaseService) {}
+  constructor(
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
+    @InjectRepository(Blend)
+    private blendRepo: Repository<Blend>,
+  ) {}
 
-  async pushPlaylist(
-    blendId: string,
-    uid: string,
-  ): Promise<string> {
-    const db = this.firebase.firestore;
-    const userDoc = await db.doc(`users/${uid}`).get();
-    const user = userDoc.data()!;
+  async pushPlaylist(blendId: string, uid: string): Promise<string> {
+    const user = await this.userRepo.findOneOrFail({ where: { uid } });
+    const blend = await this.blendRepo.findOneOrFail({ where: { id: blendId } });
     const platform = user.platform as Platform;
-
-    const blendDoc = await db.doc(`blends/${blendId}`).get();
-    const blend = blendDoc.data()!;
     const tracks: PlaylistTrack[] = blend.result.playlist;
-
     const playlistName = `Blendify: ${blend.creatorName} × ${blend.joinerName}`;
 
     if (platform === 'ytmusic') {
@@ -27,13 +27,11 @@ export class PlaylistService {
         playlistName,
         tracks,
       );
-      await db.doc(`blends/${blendId}`).update({
-        'playlistUrls.ytmusic': playlistUrl,
-      });
+      blend.playlistUrls = { ...blend.playlistUrls, ytmusic: playlistUrl };
+      await this.blendRepo.save(blend);
       return playlistUrl;
     }
 
-    // Last.fm users: generate a shareable track list URL (Last.fm has no playlist API)
     const trackList = tracks
       .map((t) => `${t.artist} - ${t.title}`)
       .join('\n');
