@@ -1,8 +1,12 @@
 import { Controller, Get, Query, Res, BadRequestException } from '@nestjs/common';
 import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { nanoid } from 'nanoid';
 import { AuthService } from './auth.service';
+import { MusicService } from '../music/music.service';
+import { ListeningData } from '../entities/listening-data.entity';
 import { Platform } from '../music/types';
 
 @Controller('auth')
@@ -10,6 +14,9 @@ export class AuthController {
   constructor(
     private authService: AuthService,
     private config: ConfigService,
+    private musicService: MusicService,
+    @InjectRepository(ListeningData)
+    private listeningDataRepo: Repository<ListeningData>,
   ) {}
 
   @Get('lastfm')
@@ -48,9 +55,11 @@ export class AuthController {
       profile.image,
       session.key,
       '',
-      365 * 24 * 60 * 60, // Last.fm sessions don't expire
+      365 * 24 * 60 * 60,
       session.name,
     );
+
+    await this.fetchAndStoreMusic(uid, 'lastfm', session.name);
 
     const firebaseToken = await this.authService.createFirebaseToken(uid);
     const frontendUrl = this.config.get('FRONTEND_URL');
@@ -88,6 +97,8 @@ export class AuthController {
       tokens.expires_in,
     );
 
+    await this.fetchAndStoreMusic(uid, 'ytmusic', tokens.access_token);
+
     const firebaseToken = await this.authService.createFirebaseToken(uid);
     const frontendUrl = this.config.get('FRONTEND_URL');
     const redirectPath = state.blendId
@@ -95,5 +106,37 @@ export class AuthController {
       : `/auth/callback?firebaseToken=${firebaseToken}`;
 
     return res.redirect(`${frontendUrl}${redirectPath}`);
+  }
+
+  private async fetchAndStoreMusic(
+    uid: string,
+    platform: Platform,
+    accessTokenOrUsername: string,
+  ): Promise<void> {
+    try {
+      const profile = await this.musicService.fetchListeningProfile(
+        platform,
+        accessTokenOrUsername,
+      );
+
+      const existing = await this.listeningDataRepo.findOne({
+        where: { userUid: uid },
+      });
+
+      if (existing) {
+        existing.tracks = profile.tracks;
+        existing.artists = profile.artists;
+        await this.listeningDataRepo.save(existing);
+      } else {
+        const ld = this.listeningDataRepo.create({
+          userUid: uid,
+          tracks: profile.tracks,
+          artists: profile.artists,
+        });
+        await this.listeningDataRepo.save(ld);
+      }
+    } catch {
+      // Don't block auth if music fetch fails
+    }
   }
 }
