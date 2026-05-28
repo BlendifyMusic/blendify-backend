@@ -40,7 +40,7 @@ export class AuthService {
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: this.config.get('GOOGLE_CLIENT_ID')!,
-      scope: 'https://www.googleapis.com/auth/youtube.readonly openid profile email',
+      scope: 'https://www.googleapis.com/auth/youtube openid profile email',
       redirect_uri: this.config.get('GOOGLE_REDIRECT_URI')!,
       access_type: 'offline',
       prompt: 'consent',
